@@ -6,13 +6,12 @@
 #define PLUGIN_220
 #define PLUGIN_ID_220         220
 #define PLUGIN_NAME_220       "Mercury 230"
-//#define PLUGIN_VALUENAME1_220 "Merc_data_json"
-//#define PLUGIN_VALUENAME2_220 "Merc_stat_json"
+#define PLUGIN_VALUENAME1_220 "Merc_data_json"
+#define PLUGIN_VALUENAME2_220 "Merc_stat_json"
 #include <ESPeasySoftwareSerial.h>
 #define SerialControl 5   // RS485 Direction control
 #define RS485Transmit    HIGH
 #define RS485Receive     LOW
-#define PLUGIN_READ_TIMEOUT   1000
 
 byte testConnect[] = { 0x00, 0x00 };
 byte Access[]      = { 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01};
@@ -104,7 +103,9 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
 
     case PLUGIN_GET_DEVICEVALUENAMES:
       {
-      //  strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[0], PSTR(PLUGIN_VALUENAME1_220));
+        strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[0], PSTR(PLUGIN_VALUENAME1_220));
+        strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[1], PSTR(PLUGIN_VALUENAME2_220));
+
       break;
       }
 
@@ -153,16 +154,44 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
 
     case PLUGIN_READ:
       {
-
         TST_YES_NO=0;
-        netAdr=0;
-        testConnect[0] = netAdr;
-        send(testConnect, sizeof(testConnect), response,4);
-        if(response[0] == netAdr)
-          { TST_YES_NO=1; }
-        else
-          { TST_YES_NO=0; }
-        if(TST_YES_NO==1)
+        ACCESS_YES_NO=0;
+        ALLOW=0;
+        String getS = "loop_000";
+        if(getS.substring(0,5) == "loop_")
+          { ALLOW=1;
+            SCAN_YES_NO=1;
+            netAdr=getS.substring(5,8).toInt();
+            
+          }
+        if(ALLOW==1 or SCAN_YES_NO==1)
+          {
+           testConnect[0] = netAdr;
+           response[0] = 0;
+           send(testConnect, sizeof(testConnect), response);
+           if(response[0] == netAdr)
+             {      TST_YES_NO=1;
+             }
+            else
+             {      TST_YES_NO=0;
+             }
+
+           if(TST_YES_NO==1)
+            {
+             delay(100);
+             Access[0] = netAdr;
+             response[0] = 0;
+             send(Access, sizeof(Access), response);
+             if(response[0] == netAdr)
+              {      ACCESS_YES_NO=1;
+              }
+             else
+              {      ACCESS_YES_NO=0;
+              }
+            }
+
+
+        if(ACCESS_YES_NO==1)
          {
           float* Uv = getCurrent(netAdr,Suply,12);
           float* Ia = getCurrent(netAdr,Current,12);
@@ -183,7 +212,7 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
           int controller = Settings.TaskDevicePluginConfig[event->TaskIndex][5];
           int Hours = hour();
           int Minutes = minute();
-          date_day = day();
+          int date_day = day();
           int start_hour = Settings.TaskDevicePluginConfig[event->TaskIndex][1];
           int start_min = Settings.TaskDevicePluginConfig[event->TaskIndex][2];
           int end_hour = Settings.TaskDevicePluginConfig[event->TaskIndex][3];
@@ -233,7 +262,7 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
                   //log += result2;
                   //addLog(LOG_LEVEL_INFO, log);
                   tmppubname = "/Mercury230/Merc_stat_json";
-                  count_stat = 1;
+                  count_stat == 1;
                 }
              }
           MQTTpublish(controller, tmppubname.c_str(), value.c_str(), Settings.MQTTRetainFlag);
@@ -243,6 +272,7 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
           {count_stat = 0; }
         success = true;
         break;
+      } //if
       }  //PLUGIN_READ
   } //switch
   return success;
@@ -253,7 +283,7 @@ String getSerialNumber(int netAdr)
   String s1,s2,s3,s4;
   response[0]=0;
   Sn[0] = netAdr;
-  send(Sn, sizeof(Sn),response,4);
+  send(Sn, sizeof(Sn),response);
   if((int)response[1] < 10) { s1="0" + String((int)response[1]); } else {s1=String((int)response[1]);}
   if((int)response[2] < 10) { s2="0" + String((int)response[2]); } else {s2=String((int)response[2]);}
   if((int)response[3] < 10) { s3="0" + String((int)response[3]); } else {s3=String((int)response[3]);}
@@ -269,7 +299,7 @@ float* getPowerNow(int netAdr, int length_resp)
 {
   response[0]=0;
   Power[0] = netAdr;
-  send(Power, sizeof(Power),response,15);
+  send(Power, sizeof(Power),response);
   int l = length_resp;
   //String log = F("Byte response 15 bytes:");
   //for(int i=0; i<l; i++)
@@ -319,7 +349,7 @@ float* getCurrent(int netAdr,byte cmdget[], int length_resp)
   response[0]=0;
   Current[0] = netAdr;
   long* P = new long[3];
-  send(cmdget, sizeof(Current),response,12);
+  send(cmdget, sizeof(Current),response);
   int l = length_resp;
   //String log = F("Byte response 12 bytes:");
   //for(int i=0; i<l; i++)
@@ -356,7 +386,7 @@ float* getCurrent(int netAdr,byte cmdget[], int length_resp)
 float getEnergyMT(int netAdr,byte cmdget[], int length_resp)
 {
   response[0]=0;
-  send(cmdget, sizeof(cmdget),response,19);
+  send(cmdget, sizeof(cmdget),response);
   int l = length_resp;
   //String log = F("Byte response 19 bytes:");
   //for(int i=0; i<l; i++)
@@ -385,7 +415,7 @@ float getEnergyMT(int netAdr,byte cmdget[], int length_resp)
 }
 
 
-void send(byte *cmd, int s, byte *response, int resp_length) {
+void send(byte *cmd, int s, byte *response) {
   unsigned int crc = crc16MODBUS(cmd, s);
   unsigned int crc1 = crc & 0xFF;
   unsigned int crc2 = (crc>>8) & 0xFF;
@@ -400,26 +430,15 @@ void send(byte *cmd, int s, byte *response, int resp_length) {
   byte i = 0;
   digitalWrite(SerialControl, RS485Receive);  // Init Transceiver
   delay(200);
-  long timer = millis() + PLUGIN_READ_TIMEOUT;
-  int counter = 0;
-  while (!timeOutReached(timer) && (counter < resp_length)) {
-
          if (RS485Serial->available())
            {
-              while (RS485Serial->available())
+             while (RS485Serial->available())
                {
                 byteReceived= RS485Serial->read();    // Read received byte
                 delay(10);
                 response[i++] = byteReceived;
                 }
            }
-}
-if (counter < resp_length){
-      addLog(LOG_LEVEL_INFO, F("Mercury230: Error, timeout while trying to read"));
-  }
-
-
-
 
 
   delay(20);
