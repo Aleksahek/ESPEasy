@@ -116,8 +116,6 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
         addFormNumericBox(F("Start time to read stat for every month, min"), F("plugin_220_start_min"), Settings.TaskDevicePluginConfig[event->TaskIndex][2], 0, 59);
 	      addFormNumericBox(F("End time to read stat for every month, hour"), F("plugin_220_end_hour"), Settings.TaskDevicePluginConfig[event->TaskIndex][3], 0, 23);
         addFormNumericBox(F("End time to read stat for every month, min"), F("plugin_220_end_min"), Settings.TaskDevicePluginConfig[event->TaskIndex][4], 0, 59);
-
-        //addFormNote(F("Select controler to send all data"));
         addFormNumericBox(F("Select MQTT controller to publish data in json format "), F("plugin_220_controller"), Settings.TaskDevicePluginConfig[event->TaskIndex][5], 1, 4);
         addFormNote(F("MQTT topic to publish runtime data is: \"Mercury230/Merc_data_json\""));
         addFormNote(F("MQTT topic to publish history data is: \"Mercury230/Merc_stat_json\""));
@@ -162,7 +160,7 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
           { ALLOW=1;
             SCAN_YES_NO=1;
             netAdr=getS.substring(5,8).toInt();
-            
+
           }
         if(ALLOW==1 or SCAN_YES_NO==1)
           {
@@ -193,7 +191,8 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
 
         if(ACCESS_YES_NO==1)
          {
-          float* Uv = getCurrent(netAdr,Suply,12);
+
+          float* Uv= getCurrent(netAdr,Suply,12);
           float* Ia = getCurrent(netAdr,Current,12);
           float* Pw = getPowerNow(netAdr,15);
           float  T1 = getEnergyMT(netAdr,energyT1,19);
@@ -266,6 +265,10 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
                 }
              }
           MQTTpublish(controller, tmppubname.c_str(), value.c_str(), Settings.MQTTRetainFlag);
+          delete[] Uv;
+          delete[] Ia;
+          delete[] Pw;
+
         } //IF TST_YES_NO
         delay(1000);
         if ((count_stat == 1) & (day() != date_day))
@@ -273,7 +276,7 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
         success = true;
         break;
       } //if
-      }  //PLUGIN_READ
+    }  //PLUGIN_READ
   } //switch
   return success;
 } //boolean Plugin_220
@@ -322,6 +325,7 @@ float* getPowerNow(int netAdr, int length_resp)
       return 0;
     }
   long* P = new long[4];
+
   response[1] &= ~(1<<6);
   response[1] &= ~(1<<7);
   response[4] &= ~(1<<6);
@@ -336,10 +340,13 @@ float* getPowerNow(int netAdr, int length_resp)
   P[2] = ((response[7] << 16)+ (response[9] << 8) + response[8]);
   P[3] = ((response[10] << 16)+ (response[12] << 8) + response[11]);
   float* U = new float[4];
+
   U[0] = ((float)P[0])/100;
   U[1] = ((float)P[1])/100;
   U[2] = ((float)P[2])/100;
   U[3] = ((float)P[3])/100;
+  delete[] P;
+
   if(response[0] == netAdr)   return (U);
     else   return 0;
 }
@@ -376,10 +383,12 @@ float* getCurrent(int netAdr,byte cmdget[], int length_resp)
   P[1] = ((response[4] << 16)+ (response[6] << 8) + response[5]);
   P[2] = ((response[7] << 16)+ (response[9] << 8) + response[8]);
   float* U = new float[3];
+
   U[0] = ((float)P[0])/100;
   U[1] = ((float)P[1])/100;
   U[2] = ((float)P[2])/100;
-      if(response[0] == netAdr)   return (U);
+  delete[] P;
+  if(response[0] == netAdr)   return (U);
     else   return 0;
 }
 
@@ -411,6 +420,7 @@ float getEnergyMT(int netAdr,byte cmdget[], int length_resp)
 
   long  P0 = ((response[2] << 24)+(response[1] << 16)+ (response[4] << 8) + response[3]);
   float U0 = ((float)P0)/1000;
+
   return   U0;
 }
 
