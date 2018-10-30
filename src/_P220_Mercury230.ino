@@ -325,7 +325,7 @@ else
                   MQTTpublish(controller, tmppubname.c_str(), value.c_str(), Settings.MQTTRetainFlag);
 
 
-                  String stat_day = String( "{\"D\":"+ String(D) + "\"DT1\":"+ String(DT1)+ "\"DT2\":"+ String(DT2) +"}");
+                  String stat_day = String( "{\"D\":"+ String(D) + ",\"DT1\":"+ String(DT1)+ ",\"DT2\":"+ String(DT2) +"}");
                   value=stat_day;
                   tmppubname = "/Mercury230/Merc_stat_day_json";
                   delay(200);
