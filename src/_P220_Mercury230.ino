@@ -9,9 +9,10 @@
 #define PLUGIN_VALUENAME1_220 "Merc_data_json"
 #define PLUGIN_VALUENAME2_220 "Merc_stat_json"
 #include <ESPeasySoftwareSerial.h>
-#define SerialControl 5   // RS485 Direction control
-#define RS485Transmit    HIGH
-#define RS485Receive     LOW
+//#define SerialControl 5   // RS485 Direction control
+//#define RS485Transmit    HIGH
+//#define RS485Receive     LOW
+//#define RXBUFFSZ  19
 
 byte testConnect[] = { 0x00, 0x00 };
 byte Access[]      = { 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01};
@@ -34,6 +35,12 @@ byte energyT1[]  =   { 0x00, 0x05, 0x00, 0x01 };///  суммарная энер
 byte energyT2[]  =   { 0x00, 0x05, 0x00, 0x02 };///  суммарная энергия прямая + обратная + активная + реактивная
 byte energyT3[]  =   { 0x00, 0x05, 0x00, 0x03 };///  суммарная энергия прямая + обратная + активная + реактивная
 byte energyT4[]  =   { 0x00, 0x05, 0x00, 0x04 };///  суммарная энергия прямая + обратная + активная + реактивная
+
+byte energyD[]   =  { 0x00, 0x05, 0x50 ,0x00 };
+byte energyDT1[] =  { 0x00, 0x05, 0x50 ,0x01 };
+byte energyDT2[] =  { 0x00, 0x05, 0x50 ,0x02 };
+
+
 
 byte energyM1T1[] = { 0x00, 0x05, 0x31 ,0x01 };
 byte energyM1T2[] = { 0x00, 0x05 ,0x31, 0x02 };
@@ -71,10 +78,23 @@ int ALLOW=0;
 int count_stat=0;
 int date_day;
 
-ESPeasySoftwareSerial *RS485Serial;
+long count_sec=0;
+long count_min=0;
+boolean read_stat=false;
+
+
+
+//ESPeasySoftwareSerial *SoftSerial = NULL;
+//ESPeasySoftwareSerial *swSerial = NULL;
+ESPeasySoftwareSerial *RS485Serial = NULL;
+int rxPin = -1;
+int txPin = -1;
+
+
 
 boolean Plugin_220(byte function, struct EventStruct *event, String& string)
 {
+
   boolean success = false;
 
   switch (function)
@@ -109,17 +129,26 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
       break;
       }
 
+      case PLUGIN_GET_DEVICEGPIONAMES: {
+      event->String1 = F("GPIO TX");
+       event->String2 = F("GPIO RX");
+         break;
+       }
+
     case PLUGIN_WEBFORM_LOAD:
       {
  	      addFormCheckBox(F("Read month stat"), F("plugin_220_stat"), Settings.TaskDevicePluginConfig[event->TaskIndex][0]);
-        addFormNumericBox(F("Start time to read stat for every month, hour"), F("plugin_220_start_hour"), Settings.TaskDevicePluginConfig[event->TaskIndex][1], 0, 23);
-        addFormNumericBox(F("Start time to read stat for every month, min"), F("plugin_220_start_min"), Settings.TaskDevicePluginConfig[event->TaskIndex][2], 0, 59);
-	      addFormNumericBox(F("End time to read stat for every month, hour"), F("plugin_220_end_hour"), Settings.TaskDevicePluginConfig[event->TaskIndex][3], 0, 23);
-        addFormNumericBox(F("End time to read stat for every month, min"), F("plugin_220_end_min"), Settings.TaskDevicePluginConfig[event->TaskIndex][4], 0, 59);
-        addFormNumericBox(F("Select MQTT controller to publish data in json format "), F("plugin_220_controller"), Settings.TaskDevicePluginConfig[event->TaskIndex][5], 1, 4);
+        addFormNumericBox(F("Time period for read stat in min"), F("plugin_220_stat_period"), Settings.TaskDevicePluginConfig[event->TaskIndex][1],1,43200);
+      //  addFormNumericBox(F("Start time to read stat for every month, hour"), F("plugin_220_start_hour"), Settings.TaskDevicePluginConfig[event->TaskIndex][1], 0, 23);
+    //    addFormNumericBox(F("Start time to read stat for every month, min"), F("plugin_220_start_min"), Settings.TaskDevicePluginConfig[event->TaskIndex][2], 0, 59);
+	   //   addFormNumericBox(F("End time to read stat for every month, hour"), F("plugin_220_end_hour"), Settings.TaskDevicePluginConfig[event->TaskIndex][3], 0, 23);
+    //    addFormNumericBox(F("End time to read stat for every month, min"), F("plugin_220_end_min"), Settings.TaskDevicePluginConfig[event->TaskIndex][4], 0, 59);
+        addFormNumericBox(F("Select MQTT controller to publish data in json format "), F("plugin_220_controller"), Settings.TaskDevicePluginConfig[event->TaskIndex][2], 1, 4);
         addFormNote(F("MQTT topic to publish runtime data is: \"Mercury230/Merc_data_json\""));
-        addFormNote(F("MQTT topic to publish history data is: \"Mercury230/Merc_stat_json\""));
-        addFormNote(F("Interval (below) must be shorter then period between end and start"));
+        addFormNote(F("MQTT topic to publish stat data for all month is: \"Mercury230/Merc_stat_json\""));
+        addFormNote(F("MQTT topic to publish stat data for previous day is: \"Mercury230/Merc_stat_day_json\""));
+        addFormNote(F("MQTT interval send topic is  200 ms "));
+  //      addFormNote(F("Interval (below) must be shorter then period between end and start"));
 
         success = true;
         break;
@@ -128,23 +157,52 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
         case PLUGIN_WEBFORM_SAVE:
       {
         Settings.TaskDevicePluginConfig[event->TaskIndex][0] = isFormItemChecked(F("plugin_220_stat"));
-        Settings.TaskDevicePluginConfig[event->TaskIndex][1] = getFormItemInt(F("plugin_220_start_hour"));
-        Settings.TaskDevicePluginConfig[event->TaskIndex][2] = getFormItemInt(F("plugin_220_start_min"));
-        Settings.TaskDevicePluginConfig[event->TaskIndex][3] = getFormItemInt(F("plugin_220_end_hour"));
-        Settings.TaskDevicePluginConfig[event->TaskIndex][4] = getFormItemInt(F("plugin_220_end_min"));
-        Settings.TaskDevicePluginConfig[event->TaskIndex][5] = getFormItemInt(F("plugin_220_controller"));
+        Settings.TaskDevicePluginConfig[event->TaskIndex][1] = getFormItemInt(F("plugin_220_stat_period"));
+      //  Settings.TaskDevicePluginConfig[event->TaskIndex][2] = getFormItemInt(F("plugin_220_start_min"));
+    //    Settings.TaskDevicePluginConfig[event->TaskIndex][3] = getFormItemInt(F("plugin_220_end_hour"));
+    //    Settings.TaskDevicePluginConfig[event->TaskIndex][4] = getFormItemInt(F("plugin_220_end_min"));
+        Settings.TaskDevicePluginConfig[event->TaskIndex][2] = getFormItemInt(F("plugin_220_controller"));
         success = true;
         break;
       }
 
       case PLUGIN_INIT:
       {
-        RS485Serial = new ESPeasySoftwareSerial(Settings.TaskDevicePin1[event->TaskIndex], Settings.TaskDevicePin2[event->TaskIndex]);
-        RS485Serial->begin(9600);
-       Serial.begin(9600);
-	     pinMode(SerialControl, OUTPUT);
-	     digitalWrite(SerialControl, RS485Receive);
+
+        int rxPin = Settings.TaskDevicePin1[event->TaskIndex];
+        int txPin = Settings.TaskDevicePin2[event->TaskIndex];
+
+
+String log = F("Mercury230 : config ");
+log += rxPin;
+log += txPin;
+
+addLog(LOG_LEVEL_DEBUG, log);
+
+if (RS485Serial != NULL) {
+  // Regardless the set pins, the software serial must be deleted.
+  delete RS485Serial;
+  RS485Serial = NULL;
+}
+
+// Hardware serial is RX on 3 and TX on 1
+if (rxPin == 3 && txPin == 1)
+{
+  log = F("Mercury230 : using hardware serial");
+  addLog(LOG_LEVEL_INFO, log);
+  Serial.begin(9600);
+  Serial.flush();
+}
+else
+{
+  log = F("Mercury230: using software serial");
+  addLog(LOG_LEVEL_INFO, log);
+  RS485Serial = new ESPeasySoftwareSerial(rxPin, txPin, false, 96); // 96 Bytes buffer, enough for up to 3 packets.
+  RS485Serial->begin(9600);
+  RS485Serial->flush();
+}
 	     delay(300);
+
 	     success = true;
       break;
       }
@@ -192,36 +250,34 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
         if(ACCESS_YES_NO==1)
          {
 
-          float* Uv= getCurrent(netAdr,Suply,12);
-          float* Ia = getCurrent(netAdr,Current,12);
-          float* Pw = getPowerNow(netAdr,15);
+        float Uv1,Uv2,Uv3;
+        float Ia1,Ia2,Ia3;
+        float Pw0,Pw1,Pw2,Pw3;
+
+      getSupply(netAdr,Suply,12,Uv1,Uv2,Uv3);
+      getCurrent(netAdr,Current,12,Ia1,Ia2,Ia3);
+      getPowerNow(netAdr,15,Pw0,Pw1,Pw2,Pw3);
+
           float  T1 = getEnergyMT(netAdr,energyT1,19);
           float  T2 =getEnergyMT(netAdr,energyT2,19);
           float  T3 = getEnergyMT(netAdr,energyT3,19);
           float  T4 = getEnergyMT(netAdr,energyT4,19);
           String result1 = String("{");
-          result1 += String( "\"Ia1\":" + String(Ia[0]/10) + ",\"Ia2\":"+   String(Ia[1]/10) + ",\"Ia3\":" +   String(Ia[2]/10) + ",");
-          result1 += String( "\"Uv1\":" + String(Uv[0]) + ",\"Uv2\":"+   String(Uv[1]) + ",\"Uv3\":" +   String(Uv[2]) + ",");
-          result1 += String( "\"Pw0\":" + String(Pw[0]) + ",\"Pw1\":"+   String(Pw[1]) + ",\"Pw2\":" +   String(Pw[2]) +   ",\"Pw3\":" +  String(Pw[3]) + ",");
+          result1 += String( "\"Ia1\":" + String(Ia1) + ",\"Ia2\":"+   String(Ia2) + ",\"Ia3\":" +   String(Ia3) + ",");
+          result1 += String( "\"Uv1\":" + String(Uv1) + ",\"Uv2\":"+   String(Uv2) + ",\"Uv3\":" +   String(Uv3) + ",");
+          result1 += String( "\"Pw0\":" + String(Pw0) + ",\"Pw1\":"+   String(Pw1) + ",\"Pw2\":" +   String(Pw2) +   ",\"Pw3\":" +  String(Pw3) + ",");
           result1 += String( "\"T1\":" + String(T1) + ",\"T2\":"+   String(T2) + ",\"T3\":"+   String(T3)+   ",\"T4\":"+   String(T4));
           result1 += String("}");
           String value = "";
           value = result1;
           String tmppubname = "/Mercury230/Merc_data_json";
-          int controller = Settings.TaskDevicePluginConfig[event->TaskIndex][5];
-          int Hours = hour();
-          int Minutes = minute();
-          int date_day = day();
-          int start_hour = Settings.TaskDevicePluginConfig[event->TaskIndex][1];
-          int start_min = Settings.TaskDevicePluginConfig[event->TaskIndex][2];
-          int end_hour = Settings.TaskDevicePluginConfig[event->TaskIndex][3];
-          int end_min = Settings.TaskDevicePluginConfig[event->TaskIndex][4];
+          int controller = Settings.TaskDevicePluginConfig[event->TaskIndex][2];
           bool checked_stat = false;
           checked_stat = Settings.TaskDevicePluginConfig[event->TaskIndex][0];
-          if ((checked_stat == true) & (count_stat == 0))
+           MQTTpublish(controller, tmppubname.c_str(), value.c_str(), Settings.MQTTRetainFlag);
+          if ((checked_stat == true) & (read_stat == true))
             {
-              if ((start_hour <= Hours) & (end_hour >= Hours) & ( start_min <= Minutes) & (end_min >= Minutes) )
-                {
+
                   String log = F("start get stat");
                   addLog(LOG_LEVEL_INFO, log);
                   float  M1T1 = getEnergyMT(netAdr,energyM1T1,19);
@@ -248,35 +304,67 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
                   float  M11T2 = getEnergyMT(netAdr,energyM11T2,19);
                   float  M12T1 = getEnergyMT(netAdr,energyM12T1,19);
                   float  M12T2 = getEnergyMT(netAdr,energyM12T2,19);
-                  String result2 = String("{");
-                  result2 += String( "\"M1T1\":" + String(M1T1) + ",\"M1T2\":"+   String(M1T2)      + ",\"M2T1\":" +   String(M2T1) + ",\"M2T2\":" +   String(M2T2)+ ",");
-                  result2 +=  String( "\"M3T1\":" + String(M3T1) + ",\"M3T2\":"+   String(M3T2)     + ",\"M4T1\":" +   String(M4T1) + ",\"M4T2\":" +   String(M4T2)+ ",");
-                  result2 +=  String( "\"M5T1\":" + String(M5T1) + ",\"M5T2\":"+   String(M5T2)     + ",\"M6T1\":" +   String(M6T1) + ",\"M6T2\":" +   String(M6T2)+ ",");
-                  result2 += String( "\"M7T1\":" + String(M7T1)  + ",\"M7T2\":"+   String(M7T2)     + ",\"M8T1\":" +   String(M8T1) + ",\"M8T2\":" +   String(M8T2)+ ",");
-                  result2 += String( "\"M9T1\":" + String(M9T1)  + ",\"M9T2\":"+   String(M9T2)     + ",\"M10T1\":" +   String(M10T1) + ",\"M10T2\":" +   String(M10T2)+ ",");
-                  result2 += String( "\"M11T1\":" + String(M11T1)  + ",\"M11T2\":"+   String(M11T2)     + ",\"M12T1\":" +   String(M12T1) + ",\"M12T2\":" +   String(M12T2));
-                  result2 += String("}");
-                  value=result2;
-                  //log = F("Mercury stat data: ");
-                  //log += result2;
-                  //addLog(LOG_LEVEL_INFO, log);
+                  float  D = getEnergyMT(netAdr,energyD,19);
+                  float  DT1 = getEnergyMT(netAdr,energyDT1,19);
+                  float  DT2 = getEnergyMT(netAdr,energyDT2,19);
+
+                  String stat_month = String("{");
+                  stat_month += String( "\"M1T1\":" + String(M1T1) + ",\"M1T2\":"+   String(M1T2)      + ",\"M2T1\":" +   String(M2T1) + ",\"M2T2\":" +   String(M2T2)+ ",");
+                  stat_month +=  String( "\"M3T1\":" + String(M3T1) + ",\"M3T2\":"+   String(M3T2)     + ",\"M4T1\":" +   String(M4T1) + ",\"M4T2\":" +   String(M4T2)+ ",");
+                  stat_month +=  String( "\"M5T1\":" + String(M5T1) + ",\"M5T2\":"+   String(M5T2)     + ",\"M6T1\":" +   String(M6T1) + ",\"M6T2\":" +   String(M6T2)+ ",");
+                  stat_month += String( "\"M7T1\":" + String(M7T1)  + ",\"M7T2\":"+   String(M7T2)     + ",\"M8T1\":" +   String(M8T1) + ",\"M8T2\":" +   String(M8T2)+ ",");
+                  stat_month += String( "\"M9T1\":" + String(M9T1)  + ",\"M9T2\":"+   String(M9T2)     + ",\"M10T1\":" +   String(M10T1) + ",\"M10T2\":" +   String(M10T2)+ ",");
+                  stat_month += String( "\"M11T1\":" + String(M11T1)  + ",\"M11T2\":"+   String(M11T2)     + ",\"M12T1\":" +   String(M12T1) + ",\"M12T2\":" +   String(M12T2)+",");
+                  stat_month += String("}");
+                  value=stat_month;
+            //      log = F("Mercury stat day data: ");
+            //      log += resultday;
+          //        addLog(LOG_LEVEL_INFO, log);
                   tmppubname = "/Mercury230/Merc_stat_json";
-                  count_stat == 1;
-                }
+                  delay(200);
+                  MQTTpublish(controller, tmppubname.c_str(), value.c_str(), Settings.MQTTRetainFlag);
+
+
+                  String stat_day = String( "{\"D\":"+ String(D) + "\"DT1\":"+ String(DT1)+ "\"DT2\":"+ String(DT2) +"}");
+                  value=stat_day;
+                  tmppubname = "/Mercury230/Merc_stat_day_json";
+                  delay(200);
+                  MQTTpublish(controller, tmppubname.c_str(), value.c_str(), Settings.MQTTRetainFlag);
+
+                  read_stat=false;
              }
-          MQTTpublish(controller, tmppubname.c_str(), value.c_str(), Settings.MQTTRetainFlag);
-          delete[] Uv;
-          delete[] Ia;
-          delete[] Pw;
+
+
 
         } //IF TST_YES_NO
         delay(1000);
-        if ((count_stat == 1) & (day() != date_day))
-          {count_stat = 0; }
         success = true;
         break;
       } //if
     }  //PLUGIN_READ
+
+    case PLUGIN_ONCE_A_SECOND:
+    {
+      int stat_period = Settings.TaskDevicePluginConfig[event->TaskIndex][1];
+      count_sec++;
+    long old_count_min=count_min;
+    if ((count_sec % 60) == 0 )
+        {
+          count_min++;
+        }
+     if ( ((count_min % stat_period) == 0)  & count_min>old_count_min )
+      {
+        read_stat = true;
+      }
+      //code to be executed once a second. Tasks which do not require fast response can be added here
+      success = true;
+    }  // END PLUGIN_ONCE_A_SECOND
+
+
+
+
+
+
   } //switch
   return success;
 } //boolean Plugin_220
@@ -298,7 +386,7 @@ String getSerialNumber(int netAdr)
   return String(response[0])+";"+n;
 }
 
-float* getPowerNow(int netAdr, int length_resp)
+void getPowerNow(int netAdr, int length_resp,float &Pw0,float &Pw1,float &Pw2,float &Pw3)
 {
   response[0]=0;
   Power[0] = netAdr;
@@ -322,10 +410,8 @@ float* getPowerNow(int netAdr, int length_resp)
     {
       String log = F("CRC is error!");
       addLog(LOG_LEVEL_INFO, log);
-      return 0;
+    //  return 0;
     }
-  long* P = new long[4];
-
   response[1] &= ~(1<<6);
   response[1] &= ~(1<<7);
   response[4] &= ~(1<<6);
@@ -334,36 +420,23 @@ float* getPowerNow(int netAdr, int length_resp)
   response[7] &= ~(1<<7);
   response[10] &= ~(1<<6);
   response[10] &= ~(1<<7);
+  long P0 = ((response[1] << 16)+ (response[3] << 8) + response[2]);
+  long P1 = ((response[4] << 16)+ (response[6] << 8) + response[5]);
+  long P2 = ((response[7] << 16)+ (response[9] << 8) + response[8]);
+  long P3 = ((response[10] << 16)+ (response[12] << 8) + response[11]);
+  Pw0 = ((float)P0)/100;
+  Pw1 = ((float)P1)/100;
+  Pw2 = ((float)P2)/100;
+  Pw3 = ((float)P3)/100;
 
-  P[0] = ((response[1] << 16)+ (response[3] << 8) + response[2]);
-  P[1] = ((response[4] << 16)+ (response[6] << 8) + response[5]);
-  P[2] = ((response[7] << 16)+ (response[9] << 8) + response[8]);
-  P[3] = ((response[10] << 16)+ (response[12] << 8) + response[11]);
-  float* U = new float[4];
-
-  U[0] = ((float)P[0])/100;
-  U[1] = ((float)P[1])/100;
-  U[2] = ((float)P[2])/100;
-  U[3] = ((float)P[3])/100;
-  delete[] P;
-
-  if(response[0] == netAdr)   return (U);
-    else   return 0;
 }
 
-float* getCurrent(int netAdr,byte cmdget[], int length_resp)
+void getSupply(int netAdr,byte cmdget[], int length_resp, float  &Uv1,float &Uv2,float &Uv3 )
 {
   response[0]=0;
   Current[0] = netAdr;
-  long* P = new long[3];
   send(cmdget, sizeof(Current),response);
   int l = length_resp;
-  //String log = F("Byte response 12 bytes:");
-  //for(int i=0; i<l; i++)
-  //  {
-  //    log += response[i];
-  //  }
-  //addLog(LOG_LEVEL_INFO, log);
   byte crcb1=response[l-2];
   byte crcb2=response[l-1];
   unsigned int crcm = crc16MODBUS(response, l-2);
@@ -376,21 +449,45 @@ float* getCurrent(int netAdr,byte cmdget[], int length_resp)
     {
       String log = F("CRC is error!");
       addLog(LOG_LEVEL_INFO, log);
-      return 0;
     }
+  long P1 = ((response[1] << 16)+ (response[3] << 8) + response[2]);
+  long P2 = ((response[4] << 16)+ (response[6] << 8) + response[5]);
+  long P3 = ((response[7] << 16)+ (response[9] << 8) + response[8]);
+  Uv1 = ((float)P1)/100;
+  Uv2 = ((float)P2)/100;
+  Uv3 = ((float)P3)/100;
 
-  P[0] = ((response[1] << 16)+ (response[3] << 8) + response[2]);
-  P[1] = ((response[4] << 16)+ (response[6] << 8) + response[5]);
-  P[2] = ((response[7] << 16)+ (response[9] << 8) + response[8]);
-  float* U = new float[3];
-
-  U[0] = ((float)P[0])/100;
-  U[1] = ((float)P[1])/100;
-  U[2] = ((float)P[2])/100;
-  delete[] P;
-  if(response[0] == netAdr)   return (U);
-    else   return 0;
 }
+
+void getCurrent(int netAdr,byte cmdget[], int length_resp, float  &Ia1,float &Ia2,float &Ia3 )
+{
+  response[0]=0;
+  Current[0] = netAdr;
+  send(cmdget, sizeof(Current),response);
+  int l = length_resp;
+  byte crcb1=response[l-2];
+  byte crcb2=response[l-1];
+  unsigned int crcm = crc16MODBUS(response, l-2);
+  unsigned int crc1m = crcm & 0xFF;
+  unsigned int crc2m = (crcm>>8) & 0xFF;
+  if ((crcb1 == crc1m) & (crcb2 ==crc2m) )
+    {
+    }
+  else
+    {
+      String log = F("CRC is error!");
+      addLog(LOG_LEVEL_INFO, log);
+    }
+  long P1 = ((response[1] << 16)+ (response[3] << 8) + response[2]);
+  long P2 = ((response[4] << 16)+ (response[6] << 8) + response[5]);
+  long P3 = ((response[7] << 16)+ (response[9] << 8) + response[8]);
+  Ia1 = ((float)P1)/1000;
+  Ia2 = ((float)P2)/1000;
+  Ia3 = ((float)P3)/1000;
+
+}
+
+
 
 float getEnergyMT(int netAdr,byte cmdget[], int length_resp)
 {
@@ -430,25 +527,54 @@ void send(byte *cmd, int s, byte *response) {
   unsigned int crc1 = crc & 0xFF;
   unsigned int crc2 = (crc>>8) & 0xFF;
   delay(10);
-  digitalWrite(SerialControl, RS485Transmit);  // Init Transceiver
-       for(int i=0; i<s; i++)
-       {
-              RS485Serial->write(cmd[i]);
-       }
-  RS485Serial->write(crc1);
-  RS485Serial->write(crc2);
-  byte i = 0;
-  digitalWrite(SerialControl, RS485Receive);  // Init Transceiver
-  delay(200);
-         if (RS485Serial->available())
-           {
-             while (RS485Serial->available())
+//  digitalWrite(SerialControl, RS485Transmit);  // Init Transceiver
+
+  if (RS485Serial != NULL)
+    {
+              for(int i=0; i<s; i++)
                {
-                byteReceived= RS485Serial->read();    // Read received byte
-                delay(10);
-                response[i++] = byteReceived;
-                }
-           }
+                     RS485Serial->write(cmd[i]);
+                  }
+
+         RS485Serial->write(crc1);
+         RS485Serial->write(crc2);
+         byte i = 0;
+    //     digitalWrite(SerialControl, RS485Receive);  // Init Transceiver
+         delay(200);
+                if (RS485Serial->available())
+                  {
+                    while (RS485Serial->available())
+                      {
+                       byteReceived= RS485Serial->read();    // Read received byte
+                       delay(10);
+                       response[i++] = byteReceived;
+                       }
+                  }
+    }
+    else
+    {
+          for(int i=0; i<s; i++)
+           {
+                 Serial.write(cmd[i]);
+              }
+
+     Serial.write(crc1);
+     Serial.write(crc2);
+     byte i = 0;
+    // digitalWrite(SerialControl, RS485Receive);  // Init Transceiver
+     delay(200);
+            if (Serial.available())
+              {
+                while (Serial.available())
+                  {
+                   byteReceived= Serial.read();    // Read received byte
+                   delay(10);
+                   response[i++] = byteReceived;
+                   }
+              }
+    }
+
+
 
 
   delay(20);
@@ -498,5 +624,9 @@ unsigned int crc16MODBUS(byte *s, int count) {
 
     return crc;
 }
+
+
+
+
 
 #endif // USES_P220
